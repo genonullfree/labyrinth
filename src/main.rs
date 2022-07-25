@@ -11,10 +11,10 @@ use rtt_target::{rprintln, rtt_init_print};
 use microbit::hal::prelude::*;
 
 #[cfg(feature = "v1")]
-use microbit::{hal::twi, pac::twi0::frequency::FREQUENCY_A};
+use microbit::{hal::twi, pac::twi0::frequency::FREQUENCY_A, display::blocking::Display, hal::Timer};
 
 #[cfg(feature = "v2")]
-use microbit::{hal::twim, pac::twim0::frequency::FREQUENCY_A};
+use microbit::{hal::twim, pac::twim0::frequency::FREQUENCY_A, display::blocking::Display, hal::Timer};
 
 use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, Measurement};
 
@@ -38,6 +38,8 @@ fn main() -> ! {
     rtt_init_print!();
 
     let board = microbit::Board::take().unwrap();
+    let mut display = Display::new(board.display_pins);
+    let mut timer = Timer::new(board.TIMER0);
 
     #[cfg(feature = "v1")]
     let mut i2c = { twi::Twi::new(board.TWI0, board.i2c.into(), FREQUENCY_A::K100) };
@@ -46,6 +48,7 @@ fn main() -> ! {
 
     let mut acc = [0];
     let mut mag = [0];
+    let mut leds = [[0u8;5];5];
 
     // First write the address + register onto the bus, then read the chip's responses
     i2c.write_read(ACCELEROMETER_ADDR, &[ACCELEROMETER_ID_REG], &mut acc)
@@ -75,6 +78,8 @@ fn main() -> ! {
                 }
             }
         }
+        leds[0][0] ^= 1;
+        display.show(&mut timer, leds, 30);
         rprintln!("Accel: x: {:5} y: {:5} z: {:5}", avg.x, avg.y, avg.z);
         count = AVG_COUNT;
         avg = Accel::default();
