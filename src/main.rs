@@ -2,8 +2,6 @@
 #![no_main]
 #![no_std]
 
-use core::fmt::Error;
-use core::prelude::v1::Ok;
 use cortex_m_rt::entry;
 use panic_rtt_target as _;
 use rtt_target::{rprintln, rtt_init_print};
@@ -11,18 +9,16 @@ use rtt_target::{rprintln, rtt_init_print};
 use microbit::hal::prelude::*;
 
 #[cfg(feature = "v1")]
-use microbit::{hal::twi, pac::twi0::frequency::FREQUENCY_A, display::blocking::Display, hal::Timer};
+use microbit::{
+    display::blocking::Display, hal::twi, hal::Timer, pac::twi0::frequency::FREQUENCY_A,
+};
 
 #[cfg(feature = "v2")]
-use microbit::{hal::twim, pac::twim0::frequency::FREQUENCY_A, display::blocking::Display, hal::Timer};
+use microbit::{
+    display::blocking::Display, hal::twim, hal::Timer, pac::twim0::frequency::FREQUENCY_A,
+};
 
 use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, Measurement};
-
-const ACCELEROMETER_ADDR: u8 = 0b0011001;
-const MAGNETOMETER_ADDR: u8 = 0b0011110;
-
-const ACCELEROMETER_ID_REG: u8 = 0x0f;
-const MAGNETOMETER_ID_REG: u8 = 0x4f;
 
 const AVG_COUNT: i32 = 15;
 
@@ -31,6 +27,20 @@ struct Accel {
     x: i32,
     y: i32,
     z: i32,
+}
+
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+struct Point {
+    x: u8,
+    y: u8,
+}
+
+enum Direction {
+    Stop,
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
 #[entry]
@@ -42,21 +52,12 @@ fn main() -> ! {
     let mut timer = Timer::new(board.TIMER0);
 
     #[cfg(feature = "v1")]
-    let mut i2c = { twi::Twi::new(board.TWI0, board.i2c.into(), FREQUENCY_A::K100) };
+    let i2c = { twi::Twi::new(board.TWI0, board.i2c.into(), FREQUENCY_A::K100) };
     #[cfg(feature = "v2")]
-    let mut i2c = { twim::Twim::new(board.TWIM0, board.i2c_internal.into(), FREQUENCY_A::K400) };
+    let i2c = { twim::Twim::new(board.TWIM0, board.i2c_internal.into(), FREQUENCY_A::K100) };
 
-    let mut acc = [0];
-    let mut mag = [0];
-    let mut leds = [[0u8;5];5];
-
-    // First write the address + register onto the bus, then read the chip's responses
-    i2c.write_read(ACCELEROMETER_ADDR, &[ACCELEROMETER_ID_REG], &mut acc)
-        .unwrap();
-    i2c.write_read(MAGNETOMETER_ADDR, &[MAGNETOMETER_ID_REG], &mut mag)
-        .unwrap();
-    rprintln!("The accelerometer chip's id is: {:#b}", acc[0]);
-    rprintln!("The magnetometer chip's id is: {:#b}", mag[0]);
+    let leds = [[0u8; 5]; 5];
+    let mut dot = Point::default();
 
     let mut sensor = Lsm303agr::new_with_i2c(i2c);
     sensor.init().unwrap();
@@ -67,6 +68,7 @@ fn main() -> ! {
     let mut count = AVG_COUNT;
 
     loop {
+        // Get average acceleration
         loop {
             if sensor.accel_status().unwrap().xyz_new_data {
                 let data = sensor.accel_data().unwrap();
@@ -78,9 +80,16 @@ fn main() -> ! {
                 }
             }
         }
-        leds[0][0] ^= 1;
-        display.show(&mut timer, leds, 30);
+
+        // Update display
+        dot.shift(avg.dir());
+        let mut l = leds;
+        l[dot.x as usize][dot.y as usize] ^= 1;
+
+        display.show(&mut timer, l, 50);
         rprintln!("Accel: x: {:5} y: {:5} z: {:5}", avg.x, avg.y, avg.z);
+
+        // Reset variables
         count = AVG_COUNT;
         avg = Accel::default();
     }
@@ -97,5 +106,56 @@ impl Accel {
         self.x = self.x / c;
         self.y = self.y / c;
         self.z = self.z / c;
+    }
+
+    pub fn dir(&self) -> Direction {
+        let x = self.x.abs();
+        let y = self.y.abs();
+
+        if x < 100 && y < 100 {
+            return Direction::Stop;
+        }
+
+        if x > y {
+            if self.x > 0 {
+                Direction::Down
+            } else {
+                Direction::Up
+            }
+        } else {
+            if self.y > 0 {
+                Direction::Left
+            } else {
+                Direction::Right
+            }
+        }
+    }
+}
+
+impl Point {
+    pub fn shift(&mut self, d: Direction) {
+        match d {
+            Direction::Right => {
+                if self.x < 4 {
+                    self.x += 1;
+                }
+            }
+            Direction::Left => {
+                if self.x > 0 {
+                    self.x -= 1;
+                }
+            }
+            Direction::Down => {
+                if self.y < 4 {
+                    self.y += 1;
+                }
+            }
+            Direction::Up => {
+                if self.y > 0 {
+                    self.y -= 1;
+                }
+            }
+            Direction::Stop => (),
+        }
     }
 }
