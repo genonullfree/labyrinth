@@ -3,6 +3,7 @@
 #![no_std]
 
 use cortex_m_rt::entry;
+use heapless::Vec;
 use panic_rtt_target as _;
 use rtt_target::{rprintln, rtt_init_print};
 
@@ -33,6 +34,17 @@ struct Accel {
 struct Point {
     x: u8,
     y: u8,
+}
+
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+struct Wall {
+    a: Point,
+    b: Point,
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
+struct Labyrinth {
+    walls: Vec<Wall, 40>,
 }
 
 enum Direction {
@@ -67,6 +79,15 @@ fn main() -> ! {
     let mut avg: Accel = Accel::default();
     let mut count = AVG_COUNT;
 
+    // Setup labyrinth
+    let mut l = Labyrinth {
+        walls: Vec::<Wall, 40>::new(),
+    };
+    l.walls.push(Wall {
+        a: Point { x: 0, y: 0 },
+        b: Point { x: 1, y: 0 },
+    });
+
     loop {
         // Get average acceleration
         loop {
@@ -82,7 +103,7 @@ fn main() -> ! {
         }
 
         // Update display
-        dot.shift(avg.dir());
+        dot.shift(avg.dir(), &l);
         let mut l = leds;
         l[dot.x as usize][dot.y as usize] ^= 1;
 
@@ -133,29 +154,60 @@ impl Accel {
 }
 
 impl Point {
-    pub fn shift(&mut self, d: Direction) {
+    pub fn shift(&mut self, d: Direction, l: &Labyrinth) {
+        let mut np = self.clone();
         match d {
-            Direction::Right => {
-                if self.x < 4 {
-                    self.x += 1;
-                }
-            }
-            Direction::Left => {
-                if self.x > 0 {
-                    self.x -= 1;
-                }
-            }
-            Direction::Down => {
-                if self.y < 4 {
-                    self.y += 1;
-                }
-            }
-            Direction::Up => {
-                if self.y > 0 {
-                    self.y -= 1;
-                }
-            }
+            Direction::Right => np.move_right(),
+            Direction::Left => np.move_left(),
+            Direction::Down => np.move_down(),
+            Direction::Up => np.move_up(),
             Direction::Stop => (),
         }
+        if *self == np {
+            return;
+        }
+
+        if self.is_ok(&np, l) {
+            *self = np;
+        }
+    }
+
+    fn move_right(&mut self) {
+        if self.x < 4 {
+            self.x += 1;
+        }
+    }
+
+    fn move_left(&mut self) {
+        if self.x > 0 {
+            self.x -= 1;
+        }
+    }
+
+    fn move_down(&mut self) {
+        if self.y < 4 {
+            self.y += 1;
+        }
+    }
+
+    fn move_up(&mut self) {
+        if self.y > 0 {
+            self.y -= 1;
+        }
+    }
+
+    pub fn is_ok(&self, np: &Point, l: &Labyrinth) -> bool {
+        for w in &l.walls {
+            if w.is_blocking(self, np) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl Wall {
+    pub fn is_blocking(&self, p: &Point, np: &Point) -> bool {
+        (p == &self.a || p == &self.b) && (np == &self.a || np == &self.b)
     }
 }
