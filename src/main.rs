@@ -21,7 +21,7 @@ use microbit::{
 
 use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, Measurement};
 
-const AVG_COUNT: i32 = 15;
+const AVG_COUNT: usize = 15;
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 struct Accel {
@@ -83,59 +83,95 @@ fn main() -> ! {
     sensor.set_accel_mode(AccelMode::LowPower).unwrap();
 
     let mut avg: Accel = Accel::default();
-    let mut count = AVG_COUNT;
+    let mut count: usize = AVG_COUNT;
 
     // Setup labyrinth
     let mut l = Labyrinth {
         walls: Vec::<Wall, 40>::new(),
     };
-    let difficulty = 10;
-    let mut count = 0;
+    let mut difficulty: usize = 5;
     loop {
-        if sensor.accel_status().unwrap().xyz_new_data {
-            let data = sensor.accel_data().unwrap();
-            let wall = Wall::rand(data);
-            if l.walls.contains(&wall) {
-                continue;
-            }
-            rprintln!("Generated wall between: ({:?}) and ({:?})", wall.a, wall.b);
-            l.walls.push(wall);
-            count += 1;
-            if count == difficulty {
-                break;
-            }
-        }
-    }
-
-    loop {
-        // Get average acceleration
+        rprintln!("Difficulty Level: {}", difficulty);
+        let mut count = 0;
         loop {
             if sensor.accel_status().unwrap().xyz_new_data {
                 let data = sensor.accel_data().unwrap();
-                avg.add(data);
-                count -= 1;
-                if count == 0 {
-                    avg.avg(AVG_COUNT);
+                let wall = Wall::rand(data);
+                if l.walls.contains(&wall) {
+                    continue;
+                }
+                rprintln!("Generated wall between: ({:?}) and ({:?})", wall.a, wall.b);
+                l.walls.push(wall);
+                count += 1;
+                if count == difficulty {
                     break;
                 }
             }
         }
 
-        // Update display
-        let dir = avg.dir();
-        dot.shift(&dir, &l);
-        let mut l = world;
-        l.leds[dot.x as usize][dot.y as usize] ^= 1;
+        loop {
+            // Get average acceleration
+            loop {
+                if sensor.accel_status().unwrap().xyz_new_data {
+                    let data = sensor.accel_data().unwrap();
+                    avg.add(data);
+                    count -= 1;
+                    if count == 0 {
+                        avg.avg(AVG_COUNT);
+                        break;
+                    }
+                }
+            }
 
-        display.show(&mut timer, l.leds, 50);
-        //rprintln!("Accel: x: {:5} y: {:5} z: {:5}", avg.x, avg.y, avg.z);
-        //rprintln!("\n{:?}", l);
-        rprintln!("({}, {}) Move {:?}", dot.x, dot.y, dir);
+            // Update display
+            let dir = avg.dir();
+            dot.shift(&dir, &l);
+            let mut l = world;
+            l.leds[dot.x as usize][dot.y as usize] ^= 1;
 
-        // Reset variables
-        count = AVG_COUNT;
-        avg = Accel::default();
+            display.show(&mut timer, l.leds, 50);
+            //rprintln!("Accel: x: {:5} y: {:5} z: {:5}", avg.x, avg.y, avg.z);
+            rprintln!("({}, {}) Move {:?}", dot.x, dot.y, dir);
+
+            // Reset variables
+            count = AVG_COUNT;
+            avg = Accel::default();
+
+            if dot.x == 4 && dot.y == 4 {
+                // Winning!
+                break;
+            }
+        }
+
+        let leds = gen_winning(&difficulty);
+        let mut flash = 5;
+        loop {
+            display.show(&mut timer, leds, 250);
+            timer.delay_ms(500u16);
+            flash -= 1;
+            if flash == 0 {
+                break;
+            }
+        }
+        difficulty += 1;
+        dot = Point::default();
     }
+}
+
+fn gen_winning(d: &usize) -> [[u8; 5]; 5] {
+    let mut leds = [[0u8; 5]; 5];
+    let v = d / 5;
+    let r = d % 5;
+    for i in 0..v {
+        for j in 0..5 {
+            leds[i][j] = 1;
+        }
+    }
+    for i in 0..r {
+        leds[v][i] = 1;
+    }
+
+    leds
 }
 
 impl Accel {
@@ -144,9 +180,9 @@ impl Accel {
         self.y += m.y;
     }
 
-    pub fn avg(&mut self, c: i32) {
-        self.x = self.x / c;
-        self.y = self.y / c;
+    pub fn avg(&mut self, c: usize) {
+        self.x = self.x / c as i32;
+        self.y = self.y / c as i32;
     }
 
     pub fn dir(&self) -> Direction {
