@@ -47,6 +47,12 @@ struct Labyrinth {
     walls: Vec<Wall, 40>,
 }
 
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+struct World {
+    leds: [[u8; 5]; 5],
+}
+
+#[derive(Debug, PartialEq)]
 enum Direction {
     Stop,
     Up,
@@ -68,7 +74,7 @@ fn main() -> ! {
     #[cfg(feature = "v2")]
     let i2c = { twim::Twim::new(board.TWIM0, board.i2c_internal.into(), FREQUENCY_A::K100) };
 
-    let leds = [[0u8; 5]; 5];
+    let world = World::default();
     let mut dot = Point::default();
 
     let mut sensor = Lsm303agr::new_with_i2c(i2c);
@@ -83,10 +89,23 @@ fn main() -> ! {
     let mut l = Labyrinth {
         walls: Vec::<Wall, 40>::new(),
     };
-    l.walls.push(Wall {
-        a: Point { x: 0, y: 0 },
-        b: Point { x: 1, y: 0 },
-    });
+    let difficulty = 10;
+    let mut count = 0;
+    loop {
+        if sensor.accel_status().unwrap().xyz_new_data {
+            let data = sensor.accel_data().unwrap();
+            let wall = Wall::rand(data);
+            if l.walls.contains(&wall) {
+                continue;
+            }
+            rprintln!("Generated wall between: ({:?}) and ({:?})", wall.a, wall.b);
+            l.walls.push(wall);
+            count += 1;
+            if count == difficulty {
+                break;
+            }
+        }
+    }
 
     loop {
         // Get average acceleration
@@ -103,12 +122,15 @@ fn main() -> ! {
         }
 
         // Update display
-        dot.shift(avg.dir(), &l);
-        let mut l = leds;
-        l[dot.x as usize][dot.y as usize] ^= 1;
+        let dir = avg.dir();
+        dot.shift(&dir, &l);
+        let mut l = world;
+        l.leds[dot.x as usize][dot.y as usize] ^= 1;
 
-        display.show(&mut timer, l, 50);
-        rprintln!("Accel: x: {:5} y: {:5} z: {:5}", avg.x, avg.y, avg.z);
+        display.show(&mut timer, l.leds, 50);
+        //rprintln!("Accel: x: {:5} y: {:5} z: {:5}", avg.x, avg.y, avg.z);
+        //rprintln!("\n{:?}", l);
+        rprintln!("({}, {}) Move {:?}", dot.x, dot.y, dir);
 
         // Reset variables
         count = AVG_COUNT;
@@ -120,13 +142,11 @@ impl Accel {
     pub fn add(&mut self, m: Measurement) {
         self.x += m.x;
         self.y += m.y;
-        self.z += m.z;
     }
 
     pub fn avg(&mut self, c: i32) {
         self.x = self.x / c;
         self.y = self.y / c;
-        self.z = self.z / c;
     }
 
     pub fn dir(&self) -> Direction {
@@ -139,22 +159,22 @@ impl Accel {
 
         if x > y {
             if self.x > 0 {
-                Direction::Down
+                Direction::Right
             } else {
-                Direction::Up
+                Direction::Left
             }
         } else {
             if self.y > 0 {
-                Direction::Left
+                Direction::Up
             } else {
-                Direction::Right
+                Direction::Down
             }
         }
     }
 }
 
 impl Point {
-    pub fn shift(&mut self, d: Direction, l: &Labyrinth) {
+    pub fn shift(&mut self, d: &Direction, l: &Labyrinth) {
         let mut np = self.clone();
         match d {
             Direction::Right => np.move_right(),
@@ -172,25 +192,25 @@ impl Point {
         }
     }
 
-    fn move_right(&mut self) {
+    fn move_down(&mut self) {
         if self.x < 4 {
             self.x += 1;
         }
     }
 
-    fn move_left(&mut self) {
+    fn move_up(&mut self) {
         if self.x > 0 {
             self.x -= 1;
         }
     }
 
-    fn move_down(&mut self) {
+    fn move_right(&mut self) {
         if self.y < 4 {
             self.y += 1;
         }
     }
 
-    fn move_up(&mut self) {
+    fn move_left(&mut self) {
         if self.y > 0 {
             self.y -= 1;
         }
@@ -204,10 +224,41 @@ impl Point {
         }
         true
     }
+
+    pub fn rand(m: &Measurement) -> Self {
+        Self {
+            x: (m.x as u8 % 5),
+            y: (m.y as u8 % 5),
+        }
+    }
 }
 
 impl Wall {
     pub fn is_blocking(&self, p: &Point, np: &Point) -> bool {
         (p == &self.a || p == &self.b) && (np == &self.a || np == &self.b)
+    }
+
+    pub fn rand(m: Measurement) -> Self {
+        let l = Labyrinth::default();
+        let a = Point::rand(&m);
+        let mut z = m.z;
+        loop {
+            let d = match z % 4 {
+                0 => Direction::Up,
+                1 => Direction::Down,
+                2 => Direction::Right,
+                3 => Direction::Left,
+                _ => {
+                    z += 1;
+                    continue;
+                }
+            };
+            let mut b = a.clone();
+            b.shift(&d, &l);
+            if b != a {
+                return Self { a, b };
+            }
+            z += 1;
+        }
     }
 }
