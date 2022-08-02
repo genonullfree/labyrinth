@@ -6,3 +6,31 @@ The walls of the maze are invisible. If the direction you have chosen is blocked
 Navigate the blinking light to the bottom right corner to pass the level!
 
 Note: This is still very much a work in progress. The wall generation is "random" based on the raw accelerometer data. There is also no validation that there is a solution to the maze, as all valid moves may be walled off.
+
+## Dependencies
+
+First you will need to install the correct target for the micro:bit:
+
+```console
+# For micro:bit v2
+rustup target add thumbv7em-none-eabihf
+```
+
+> For micro:bit v1, see additional setup configurations at https://docs.rust-embedded.org/discovery/microbit/index.html.
+
+And install the `cargo`-helpers:
+
+```console
+rustup component add llvm-tools-preview
+cargo install cargo-binutils
+cargo install cargo-embed
+```
+
+## Building and Flashing
+Once all the dependencies are installed you can run:
+
+```console
+cargo embed --features v2
+```
+
+and it will compile and flash your micro:bit v2 with Labyrinth!
